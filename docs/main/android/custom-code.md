@@ -1,117 +1,247 @@
----
-title: Custom Native Android Code
-sidebar_label: Custom Native Code
-description: Custom Native Android Code
-contributors:
-  - mlynch
-  - jcesarmobile
-  - RoderickQiu
-slug: /android/custom-code
----
+import React, { useEffect, useState, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
 
-# Custom Native Android Code
+// Default audio queues
+const pauseFiles = [
+  "/audio/pause1.mp3",
+  "/audio/pause2.mp3",
+  "/audio/pause3.mp3",
+  "/audio/pause4.mp3",
+  "/audio/pause5.mp3",
+];
 
-With Capacitor, you are encouraged to write Java or Kotlin code to implement the native features your app needs.
+const whyFiles = [
+  "/audio/why1.mp3",
+  "/audio/why2.mp3",
+  "/audio/why3.mp3",
+  "/audio/why4.mp3",
+  "/audio/why5.mp3",
+];
 
-There may not be [a Capacitor plugin](/plugins.mdx) for everything--and that's okay! It is possible to write WebView-accessible native code right in your app.
+export default function PauseApp() {
+  const [queue, setQueue] = useState("pause");
+  const [customAudio, setCustomAudio] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [buttonText, setButtonText] = useState("PAUSE!");
+  const [buttonColor, setButtonColor] = useState("#dc2626"); // default red-600
+  const [backgroundColor, setBackgroundColor] = useState("#f3f4f6"); // default gray-100
 
-## WebView-Accessible Native Code
+  // Recorder state
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
 
-The easiest way to communicate between JavaScript and native code is to build a custom Capacitor plugin that is local to your app.
+  // Load saved settings on mount
+  useEffect(() => {
+    const savedText = localStorage.getItem("buttonText");
+    const savedButtonColor = localStorage.getItem("buttonColor");
+    const savedBackgroundColor = localStorage.getItem("backgroundColor");
+    const savedCustomAudio = localStorage.getItem("customAudio");
 
-### `EchoPlugin.java`
+    if (savedText) setButtonText(savedText);
+    if (savedButtonColor) setButtonColor(savedButtonColor);
+    if (savedBackgroundColor) setBackgroundColor(savedBackgroundColor);
+    if (savedCustomAudio) setCustomAudio(savedCustomAudio);
+  }, []);
 
-First, create a `EchoPlugin.java` file by [opening Android Studio](/main/android/index.md#opening-the-android-project), expanding the **app** module and the **java** folder, right-clicking on your app's Java package, selecting **New** -> **Java Class** from the context menu, and creating the file.
-
-![Android Studio app package](../../../static/img/v6/docs/android/studio-app-package.png)
-
-Copy the following Java code into `EchoPlugin.java`:
-
-```java
-package com.example.myapp;
-
-import com.getcapacitor.JSObject;
-import com.getcapacitor.Plugin;
-import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.CapacitorPlugin;
-
-@CapacitorPlugin(name = "Echo")
-public class EchoPlugin extends Plugin {
-
-    @PluginMethod()
-    public void echo(PluginCall call) {
-        String value = call.getString("value");
-
-        JSObject ret = new JSObject();
-        ret.put("value", value);
-        call.resolve(ret);
+  useEffect(() => {
+    const files = getCurrentFiles();
+    if (files.length > 0) {
+      const intro = new Audio(files[0]);
+      intro.play();
     }
+  }, [queue, customAudio]);
+
+  const getCurrentFiles = () => {
+    if (customAudio) return [customAudio];
+    return queue === "pause" ? pauseFiles : whyFiles;
+  };
+
+  const playRandomAudio = () => {
+    const files = getCurrentFiles();
+    const randomIndex = Math.floor(Math.random() * files.length);
+    const audio = new Audio(files[randomIndex]);
+    audio.play();
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      const audio = new Audio(url);
+
+      audio.onloadedmetadata = () => {
+        if (audio.duration <= 5) {
+          setCustomAudio(url);
+          localStorage.setItem("customAudio", url);
+        } else {
+          alert("File must be 5 seconds or shorter.");
+        }
+      };
+    }
+  };
+
+  const startRecording = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream);
+    mediaRecorderRef.current = mediaRecorder;
+    setAudioChunks([]);
+    mediaRecorder.start();
+    setRecording(true);
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        setAudioChunks((prev) => [...prev, event.data]);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(audioChunks, { type: "audio/mp3" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onloadedmetadata = () => {
+        if (audio.duration <= 5) {
+          setCustomAudio(url);
+          localStorage.setItem("customAudio", url);
+        } else {
+          alert("Recording must be 5 seconds or shorter.");
+        }
+      };
+    };
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  const handleTextChange = (text: string) => {
+    setButtonText(text);
+    localStorage.setItem("buttonText", text);
+  };
+
+  const handleButtonColorChange = (color: string) => {
+    setButtonColor(color);
+    localStorage.setItem("buttonColor", color);
+  };
+
+  const handleBackgroundColorChange = (color: string) => {
+    setBackgroundColor(color);
+    localStorage.setItem("backgroundColor", color);
+  };
+
+  const resetSettings = () => {
+    setButtonText("PAUSE!");
+    setButtonColor("#dc2626");
+    setBackgroundColor("#f3f4f6");
+    setCustomAudio(null);
+    setQueue("pause");
+    localStorage.clear();
+  };
+
+  return (
+    <div className={`flex flex-col items-center justify-center h-screen gap-6`} style={{ backgroundColor }}>
+      {showSettings ? (
+        <div className="flex flex-col gap-4 p-6 bg-white rounded-2xl shadow-lg w-80">
+          <h2 className="text-xl font-bold">Settings</h2>
+
+          {/* Upload */}
+          <label className="flex flex-col gap-2">
+            <span className="text-sm">Upload custom MP3/MP4 (max 5s)</span>
+            <input type="file" accept="audio/mp3, audio/mp4" onChange={handleFileUpload} />
+          </label>
+
+          {/* Recorder */}
+          <div className="flex gap-2 items-center">
+            {recording ? (
+              <Button className="bg-red-500 text-white" onClick={stopRecording}>
+                Stop Recording
+              </Button>
+            ) : (
+              <Button className="bg-green-500 text-white" onClick={startRecording}>
+                Start Recording
+              </Button>
+            )}
+          </div>
+
+          {/* Button Text */}
+          <label className="flex flex-col gap-2">
+            <span className="text-sm">Button Text (max 20 chars)</span>
+            <input
+              type="text"
+              maxLength={20}
+              value={buttonText}
+              onChange={(e) => handleTextChange(e.target.value)}
+              className="border px-2 py-1 rounded"
+            />
+          </label>
+
+          {/* Colors */}
+          <label className="flex flex-col gap-2">
+            <span className="text-sm">Button Color</span>
+            <input type="color" value={buttonColor} onChange={(e) => handleButtonColorChange(e.target.value)} />
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-sm">Background Color</span>
+            <input type="color" value={backgroundColor} onChange={(e) => handleBackgroundColorChange(e.target.value)} />
+          </label>
+
+          {/* Reset */}
+          <Button onClick={resetSettings} className="bg-yellow-500 text-white">
+            Reset to Default
+          </Button>
+
+          <Button onClick={() => setShowSettings(false)} className="bg-blue-500 text-white">
+            Back
+          </Button>
+        </div>
+      ) : (
+        <>
+          <motion.div whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.1 }}>
+            <Button
+              className={`w-56 h-56 rounded-full text-4xl font-extrabold shadow-xl text-white`}
+              style={{ backgroundColor: buttonColor }}
+              onClick={playRandomAudio}
+            >
+              {buttonText}
+            </Button>
+          </motion.div>
+
+          <div className="flex gap-4">
+            <Button
+              className={`px-4 py-2 rounded-lg font-bold shadow ${
+                queue === "pause" && !customAudio ? "bg-red-500 text-white" : "bg-gray-200"
+              }`}
+              onClick={() => {
+                setCustomAudio(null);
+                setQueue("pause");
+                handleTextChange("PAUSE!");
+              }}
+            >
+              Pause Queue
+            </Button>
+
+            <Button
+              className={`px-4 py-2 rounded-lg font-bold shadow ${
+                queue === "why" && !customAudio ? "bg-red-500 text-white" : "bg-gray-200"
+              }`}
+              onClick={() => {
+                setCustomAudio(null);
+                setQueue("why");
+                handleTextChange("WHY!");
+              }}
+            >
+              Why Queue
+            </Button>
+
+            <Button className="px-4 py-2 rounded-lg font-bold shadow bg-blue-500 text-white" onClick={() => setShowSettings(true)}>
+              Settings
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
-```
-
-### Register the Plugin
-
-We must register custom plugins on both Android and web so that Capacitor can bridge between Java and JavaScript.
-
-#### `MainActivity.java`
-
-In your app's `MainActivity.java`, use `registerPlugin()` or `registerPlugins()` to register your custom plugin(s).
-
-```diff
- public class MainActivity extends BridgeActivity {
-     @Override
-     public void onCreate(Bundle savedInstanceState) {
-+        registerPlugin(EchoPlugin.class);
-         super.onCreate(savedInstanceState);
-     }
- }
-```
-
-#### JavaScript
-
-In JS, we use `registerPlugin()` from `@capacitor/core` to create an object which is linked to our Java plugin.
-
-```typescript
-import { registerPlugin } from '@capacitor/core';
-
-const Echo = registerPlugin('Echo');
-
-export default Echo;
-```
-
-> The first parameter to `registerPlugin()` is the plugin name, which must match the `name` attribute of our `@CapacitorPlugin` annotation in `EchoPlugin.java`.
-
-**TypeScript**
-
-We can define types on our linked object by defining an interface and using it in the call to `registerPlugin()`.
-
-```diff
- import { registerPlugin } from '@capacitor/core';
-
-+export interface EchoPlugin {
-+  echo(options: { value: string }): Promise<{ value: string }>;
-+}
-
--const Echo = registerPlugin('Echo');
-+const Echo = registerPlugin<EchoPlugin>('Echo');
-
- export default Echo;
-```
-
-The generic parameter of `registerPlugin()` is what defines the structure of the linked object. You can use `registerPlugin<any>('Echo')` to ignore types if you need to. No judgment. ❤️
-
-### Use the Plugin
-
-Use the exported `Echo` object to call your plugin methods. The following snippet will call into Java on Android and print the result:
-
-```typescript
-import Echo from '../path/to/echo-plugin';
-
-const { value } = await Echo.echo({ value: 'Hello World!' });
-console.log('Response from native:', value);
-```
-
-### Next Steps
-
-[Read the Android Plugin Guide &#8250;](/plugins/creating-plugins/android-guide.md)
